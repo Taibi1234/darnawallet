@@ -1,8 +1,10 @@
-﻿
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'statistics_dashboard.dart';
+import 'transaction_management_page.dart';
 
 void main() {
   runApp(const DarnaWalletApp());
@@ -77,21 +79,16 @@ class _WalletHomePageState extends State<WalletHomePage> {
     },
   ];
 
-  double get totalIncome => transactions.fold<double>(
-        0,
-        (total, transaction) {
-          final amount = (transaction['amount'] as num).toDouble();
-          return total + (amount > 0 ? amount : 0);
-        },
-      );
+  double get totalIncome => transactions.fold<double>(0, (total, transaction) {
+    final amount = (transaction['amount'] as num).toDouble();
+    return total + (amount > 0 ? amount : 0);
+  });
 
-  double get totalExpenses => transactions.fold<double>(
-        0,
-        (total, transaction) {
-          final amount = (transaction['amount'] as num).toDouble();
-          return total + (amount < 0 ? amount.abs() : 0);
-        },
-      );
+  double get totalExpenses =>
+      transactions.fold<double>(0, (total, transaction) {
+        final amount = (transaction['amount'] as num).toDouble();
+        return total + (amount < 0 ? amount.abs() : 0);
+      });
 
   double get balance => openingBalance + totalIncome - totalExpenses;
 
@@ -132,8 +129,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
 
         loadedTransactions = decoded.map((item) {
           final transaction = Map<String, dynamic>.from(item as Map);
-          transaction['amount'] =
-              (transaction['amount'] as num).toDouble();
+          transaction['amount'] = (transaction['amount'] as num).toDouble();
           return transaction;
         }).toList();
       }
@@ -254,8 +250,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
                         onSelectionChanged: (selection) {
                           refreshDialog(() {
                             isIncome = selection.first;
-                            category =
-                                isIncome ? 'Salary' : 'Food & groceries';
+                            category = isIncome ? 'Salary' : 'Food & groceries';
                           });
                         },
                       ),
@@ -378,9 +373,274 @@ class _WalletHomePageState extends State<WalletHomePage> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Transaction added, but saving failed.')),
+      );
+    }
+  }
+
+  Future<void> _editTransaction(Map<String, dynamic> transaction) async {
+    final formKey = GlobalKey<FormState>();
+
+    String title = transaction['title'].toString();
+    String amountText = (transaction['amount'] as num).abs().toStringAsFixed(2);
+    String category = transaction['category'].toString();
+    bool isIncome = (transaction['amount'] as num) > 0;
+
+    final incomeCategories = ['Salary', 'Business', 'Gift', 'Other income'];
+
+    final expenseCategories = [
+      'Food & groceries',
+      'Food & drinks',
+      'Transport',
+      'Shopping',
+      'Utilities',
+      'Other expense',
+    ];
+
+    final allCategories = <String>{
+      ...incomeCategories,
+      ...expenseCategories,
+      category,
+    };
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, refreshDialog) {
+          final categories = allCategories.where((item) {
+            final isIncomeCategory = incomeCategories.contains(item);
+            return isIncome ? isIncomeCategory : !isIncomeCategory;
+          }).toList();
+
+          if (!categories.contains(category)) {
+            category = categories.first;
+          }
+
+          return AlertDialog(
+            title: const Text('Edit transaction'),
+            content: Form(
+              key: formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment<bool>(
+                          value: false,
+                          label: Text('Expense'),
+                          icon: Icon(Icons.arrow_upward),
+                        ),
+                        ButtonSegment<bool>(
+                          value: true,
+                          label: Text('Income'),
+                          icon: Icon(Icons.arrow_downward),
+                        ),
+                      ],
+                      selected: {isIncome},
+                      onSelectionChanged: (selection) {
+                        refreshDialog(() {
+                          isIncome = selection.first;
+                          category = isIncome ? 'Salary' : 'Food & groceries';
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      initialValue: title,
+                      decoration: const InputDecoration(
+                        labelText: 'Transaction title',
+                        border: OutlineInputBorder(),
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Enter a title';
+                        }
+                        return null;
+                      },
+                      onSaved: (value) => title = value!.trim(),
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      initialValue: amountText,
+                      decoration: const InputDecoration(
+                        labelText: 'Amount (MAD)',
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      validator: (value) {
+                        final amount = double.tryParse(
+                          (value ?? '').trim().replaceAll(',', '.'),
+                        );
+
+                        if (amount == null || !amount.isFinite || amount <= 0) {
+                          return 'Enter a valid amount above zero';
+                        }
+                        return null;
+                      },
+                      onSaved: (value) => amountText = value!.trim(),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: category,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Category',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: categories.map((item) {
+                        return DropdownMenuItem<String>(
+                          value: item,
+                          child: Text(item),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          refreshDialog(() => category = value);
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  if (!formKey.currentState!.validate()) return;
+                  formKey.currentState!.save();
+
+                  final amount = double.parse(amountText.replaceAll(',', '.'));
+
+                  Navigator.pop(dialogContext, {
+                    'title': title,
+                    'category': category,
+                    'amount': isIncome ? amount : -amount,
+                    'date': transaction['date']?.toString() ?? '',
+                  });
+                },
+                child: const Text('Save changes'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (result == null || !mounted) return;
+
+    final index = transactions.indexWhere(
+      (item) => identical(item, transaction),
+    );
+
+    if (index == -1) return;
+
+    final oldTransaction = Map<String, dynamic>.from(transactions[index]);
+
+    setState(() {
+      transactions[index] = result;
+    });
+
+    try {
+      await _saveTransactions();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Transaction added, but saving failed.'),
+          content: Text('Transaction updated successfully.'),
+          behavior: SnackBarBehavior.floating,
         ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        transactions[index] = oldTransaction;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not save changes. Please try again.'),
+        ),
+      );
+    }
+  }
+
+  Future<void> _deleteTransaction(Map<String, dynamic> transaction) async {
+    final index = transactions.indexWhere(
+      (item) => identical(item, transaction),
+    );
+
+    if (index == -1) return;
+
+    final deletedTransaction = transactions[index];
+
+    setState(() {
+      transactions.removeAt(index);
+    });
+
+    try {
+      await _saveTransactions();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('"${deletedTransaction['title']}" was deleted.'),
+          behavior: SnackBarBehavior.floating,
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () {
+              _restoreDeletedTransaction(index, deletedTransaction);
+            },
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        transactions.insert(index, deletedTransaction);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not save deletion. Please try again.'),
+        ),
+      );
+    }
+  }
+
+  Future<void> _restoreDeletedTransaction(
+    int index,
+    Map<String, dynamic> transaction,
+  ) async {
+    if (!mounted) return;
+
+    setState(() {
+      final safeIndex = index.clamp(0, transactions.length);
+      transactions.insert(safeIndex, transaction);
+    });
+
+    try {
+      await _saveTransactions();
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        transactions.remove(transaction);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not restore the transaction.')),
       );
     }
   }
@@ -420,9 +680,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
           IconButton(
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Notifications coming soon.'),
-                ),
+                const SnackBar(content: Text('Notifications coming soon.')),
               );
             },
             icon: const Icon(Icons.notifications_none_rounded),
@@ -438,8 +696,8 @@ class _WalletHomePageState extends State<WalletHomePage> {
             child: isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : selectedIndex == 0
-                    ? _buildDashboard()
-                    : _buildOtherPage(),
+                ? _buildDashboard()
+                : _buildOtherPage(),
           ),
         ),
       ),
@@ -811,42 +1069,26 @@ class _WalletHomePageState extends State<WalletHomePage> {
 
   Widget _buildOtherPage() {
     if (selectedIndex == 1) {
-      return ListView(
-        padding: const EdgeInsets.fromLTRB(22, 22, 22, 90),
-        children: [
-          const Text(
-            'All activity',
-            style: TextStyle(
-              color: navy,
-              fontSize: 25,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 18),
-          if (transactions.isEmpty)
-            const Text('No transactions yet. Tap + to add one.')
-          else
-            ...transactions.map(_buildTransaction),
-        ],
+      return TransactionManagementPage(
+        transactions: transactions,
+        onEdit: _editTransaction,
+        onDelete: _deleteTransaction,
       );
     }
 
-    final String description = selectedIndex == 2
-        ? 'Your income and expenses are calculated from your saved transactions. More spending insights are coming soon.'
-        : 'Your account settings and preferences will appear here.';
+    if (selectedIndex == 2) {
+      return StatisticsDashboard(transactions: transactions);
+    }
+
+    const String description =
+        'Your account settings and preferences will appear here.';
 
     return Padding(
       padding: const EdgeInsets.all(28),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            selectedIndex == 2
-                ? Icons.bar_chart_rounded
-                : Icons.person_outline_rounded,
-            color: green,
-            size: 64,
-          ),
+          const Icon(Icons.person_outline_rounded, color: green, size: 64),
           const SizedBox(height: 18),
           Text(
             pageTitle,
@@ -857,10 +1099,10 @@ class _WalletHomePageState extends State<WalletHomePage> {
             ),
           ),
           const SizedBox(height: 10),
-          Text(
+          const Text(
             description,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.black54, fontSize: 15),
+            style: TextStyle(color: Colors.black54, fontSize: 15),
           ),
           const SizedBox(height: 20),
           OutlinedButton(
