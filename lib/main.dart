@@ -1,5 +1,8 @@
 ﻿
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const DarnaWalletApp());
@@ -8,6 +11,8 @@ void main() {
 const Color navy = Color(0xFF142B3B);
 const Color green = Color(0xFF35C995);
 const Color background = Color(0xFFF5F7F9);
+const double openingBalance = 6426.50;
+const String storageKey = 'darnawallet_transactions';
 
 class DarnaWalletApp extends StatelessWidget {
   const DarnaWalletApp({super.key});
@@ -41,37 +46,54 @@ class WalletHomePage extends StatefulWidget {
 
 class _WalletHomePageState extends State<WalletHomePage> {
   int selectedIndex = 0;
+  bool isLoading = true;
 
-  final List<Map<String, dynamic>> transactions = [
+  List<Map<String, dynamic>> transactions = [];
+
+  final List<Map<String, dynamic>> sampleTransactions = [
     {
       'title': 'Grocery shopping',
       'category': 'Food & groceries',
       'amount': -245.50,
-      'icon': Icons.shopping_basket_outlined,
       'date': 'Today, 10:42 AM',
     },
     {
       'title': 'Monthly salary',
-      'category': 'Income',
+      'category': 'Salary',
       'amount': 6500.00,
-      'icon': Icons.account_balance_wallet_outlined,
       'date': 'Today, 08:15 AM',
     },
     {
       'title': 'Coffee shop',
       'category': 'Food & drinks',
       'amount': -32.00,
-      'icon': Icons.local_cafe_outlined,
       'date': 'Yesterday, 04:30 PM',
     },
     {
       'title': 'Internet bill',
       'category': 'Utilities',
       'amount': -199.00,
-      'icon': Icons.wifi_outlined,
       'date': 'Yesterday, 11:20 AM',
     },
   ];
+
+  double get totalIncome => transactions.fold<double>(
+        0,
+        (total, transaction) {
+          final amount = (transaction['amount'] as num).toDouble();
+          return total + (amount > 0 ? amount : 0);
+        },
+      );
+
+  double get totalExpenses => transactions.fold<double>(
+        0,
+        (total, transaction) {
+          final amount = (transaction['amount'] as num).toDouble();
+          return total + (amount < 0 ? amount.abs() : 0);
+        },
+      );
+
+  double get balance => openingBalance + totalIncome - totalExpenses;
 
   String get pageTitle {
     switch (selectedIndex) {
@@ -83,6 +105,283 @@ class _WalletHomePageState extends State<WalletHomePage> {
         return 'My profile';
       default:
         return 'My wallet';
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTransactions();
+  }
+
+  Future<void> _loadTransactions() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedData = prefs.getString(storageKey);
+
+      List<Map<String, dynamic>> loadedTransactions;
+
+      if (savedData == null) {
+        loadedTransactions = sampleTransactions
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList();
+
+        await prefs.setString(storageKey, jsonEncode(loadedTransactions));
+      } else {
+        final decoded = jsonDecode(savedData) as List<dynamic>;
+
+        loadedTransactions = decoded.map((item) {
+          final transaction = Map<String, dynamic>.from(item as Map);
+          transaction['amount'] =
+              (transaction['amount'] as num).toDouble();
+          return transaction;
+        }).toList();
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        transactions = loadedTransactions;
+        isLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        transactions = sampleTransactions
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList();
+        isLoading = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not load saved transactions. Showing demo data.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _saveTransactions() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(storageKey, jsonEncode(transactions));
+  }
+
+  String _money(double amount) {
+    final parts = amount.abs().toStringAsFixed(2).split('.');
+    final digits = parts[0];
+    final buffer = StringBuffer();
+
+    for (int i = 0; i < digits.length; i++) {
+      if (i > 0 && (digits.length - i) % 3 == 0) {
+        buffer.write(',');
+      }
+      buffer.write(digits[i]);
+    }
+
+    return '${buffer.toString()}.${parts[1]}';
+  }
+
+  IconData _iconFor(String category) {
+    final value = category.toLowerCase();
+
+    if (value.contains('salary') || value.contains('income')) {
+      return Icons.account_balance_wallet_outlined;
+    }
+    if (value.contains('food') || value.contains('grocery')) {
+      return Icons.shopping_basket_outlined;
+    }
+    if (value.contains('transport')) {
+      return Icons.directions_bus_outlined;
+    }
+    if (value.contains('bill') || value.contains('utilities')) {
+      return Icons.wifi_outlined;
+    }
+    if (value.contains('shopping')) {
+      return Icons.shopping_bag_outlined;
+    }
+
+    return Icons.receipt_long_outlined;
+  }
+
+  Future<void> _addTransaction({bool initialIncome = false}) async {
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (dialogContext) {
+        final formKey = GlobalKey<FormState>();
+        String title = '';
+        String amountText = '';
+        String category = initialIncome ? 'Salary' : 'Food & groceries';
+        bool isIncome = initialIncome;
+
+        return StatefulBuilder(
+          builder: (context, refreshDialog) {
+            final categories = isIncome
+                ? ['Salary', 'Business', 'Gift', 'Other income']
+                : [
+                    'Food & groceries',
+                    'Food & drinks',
+                    'Transport',
+                    'Shopping',
+                    'Utilities',
+                    'Other expense',
+                  ];
+
+            return AlertDialog(
+              title: Text(isIncome ? 'Add income' : 'Add expense'),
+              content: Form(
+                key: formKey,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SegmentedButton<bool>(
+                        segments: const [
+                          ButtonSegment<bool>(
+                            value: false,
+                            label: Text('Expense'),
+                            icon: Icon(Icons.arrow_upward),
+                          ),
+                          ButtonSegment<bool>(
+                            value: true,
+                            label: Text('Income'),
+                            icon: Icon(Icons.arrow_downward),
+                          ),
+                        ],
+                        selected: {isIncome},
+                        onSelectionChanged: (selection) {
+                          refreshDialog(() {
+                            isIncome = selection.first;
+                            category =
+                                isIncome ? 'Salary' : 'Food & groceries';
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Transaction title',
+                          hintText: 'e.g. Monthly salary',
+                          border: OutlineInputBorder(),
+                        ),
+                        textCapitalization: TextCapitalization.sentences,
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Enter a title';
+                          }
+                          return null;
+                        },
+                        onSaved: (value) => title = value!.trim(),
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        decoration: const InputDecoration(
+                          labelText: 'Amount (MAD)',
+                          hintText: 'e.g. 250.00',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        validator: (value) {
+                          final amount = double.tryParse(
+                            (value ?? '').trim().replaceAll(',', '.'),
+                          );
+
+                          if (amount == null ||
+                              !amount.isFinite ||
+                              amount <= 0) {
+                            return 'Enter a valid amount above zero';
+                          }
+
+                          return null;
+                        },
+                        onSaved: (value) => amountText = value!.trim(),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: category,
+                        decoration: const InputDecoration(
+                          labelText: 'Category',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: categories
+                            .map(
+                              (item) => DropdownMenuItem<String>(
+                                value: item,
+                                child: Text(item),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            refreshDialog(() => category = value);
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    if (!formKey.currentState!.validate()) return;
+
+                    formKey.currentState!.save();
+
+                    final amount = double.parse(
+                      amountText.replaceAll(',', '.'),
+                    );
+
+                    Navigator.pop(dialogContext, {
+                      'title': title,
+                      'category': category,
+                      'amount': isIncome ? amount : -amount,
+                      'date': 'Added just now',
+                    });
+                  },
+                  child: const Text('Save transaction'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result == null || !mounted) return;
+
+    setState(() {
+      transactions.insert(0, result);
+    });
+
+    try {
+      await _saveTransactions();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Transaction saved successfully.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Transaction added, but saving failed.'),
+        ),
+      );
     }
   }
 
@@ -136,12 +435,23 @@ class _WalletHomePageState extends State<WalletHomePage> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 760),
-            child: selectedIndex == 0
-                ? _buildDashboard()
-                : _buildOtherPage(),
+            child: isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : selectedIndex == 0
+                    ? _buildDashboard()
+                    : _buildOtherPage(),
           ),
         ),
       ),
+      floatingActionButton: !isLoading && selectedIndex <= 1
+          ? FloatingActionButton(
+              onPressed: _addTransaction,
+              backgroundColor: navy,
+              foregroundColor: green,
+              tooltip: 'Add transaction',
+              child: const Icon(Icons.add),
+            )
+          : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
         onDestinationSelected: (index) {
@@ -177,14 +487,11 @@ class _WalletHomePageState extends State<WalletHomePage> {
 
   Widget _buildDashboard() {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
+      padding: const EdgeInsets.fromLTRB(22, 12, 22, 90),
       children: [
         const Text(
-          'Good day ðŸ‘‹',
-          style: TextStyle(
-            fontSize: 15,
-            color: Colors.black54,
-          ),
+          'Good day!',
+          style: TextStyle(fontSize: 15, color: Colors.black54),
         ),
         const SizedBox(height: 5),
         const Text(
@@ -212,7 +519,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
             Expanded(
               child: _buildSummaryCard(
                 title: 'Income',
-                amount: '+6,500.00',
+                amount: '+${_money(totalIncome)}',
                 icon: Icons.arrow_downward_rounded,
                 color: green,
               ),
@@ -221,7 +528,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
             Expanded(
               child: _buildSummaryCard(
                 title: 'Expenses',
-                amount: '-476.50',
+                amount: '-${_money(totalExpenses)}',
                 icon: Icons.arrow_upward_rounded,
                 color: const Color(0xFFE78383),
               ),
@@ -253,11 +560,17 @@ class _WalletHomePageState extends State<WalletHomePage> {
           ],
         ),
         const SizedBox(height: 5),
-        ...transactions.take(4).map(_buildTransaction),
+        if (transactions.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Text('No transactions yet. Tap + to add one.'),
+          )
+        else
+          ...transactions.take(4).map(_buildTransaction),
         const SizedBox(height: 16),
         const Center(
           child: Text(
-            'Demo data Â· No real money is involved',
+            'Demo data · No real money is involved',
             style: TextStyle(color: Colors.black45, fontSize: 12),
           ),
         ),
@@ -286,25 +599,16 @@ class _WalletHomePageState extends State<WalletHomePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Total balance',
-                style: TextStyle(color: Colors.white70, fontSize: 15),
-              ),
-              Icon(
-                Icons.visibility_outlined,
-                color: Colors.white.withValues(alpha: 0.8),
-              ),
-            ],
+          const Text(
+            'Total balance',
+            style: TextStyle(color: Colors.white70, fontSize: 15),
           ),
           const SizedBox(height: 12),
-          const FittedBox(
+          FittedBox(
             fit: BoxFit.scaleDown,
             child: Text(
-              'MAD 12,450.00',
-              style: TextStyle(
+              'MAD ${_money(balance)}',
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 34,
                 fontWeight: FontWeight.w800,
@@ -318,16 +622,16 @@ class _WalletHomePageState extends State<WalletHomePage> {
               Expanded(
                 child: _quickAction(
                   icon: Icons.add_rounded,
-                  label: 'Add money',
-                  onTap: () => _showComingSoon('Add money'),
+                  label: 'Add income',
+                  onTap: () => _addTransaction(initialIncome: true),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: _quickAction(
-                  icon: Icons.swap_horiz_rounded,
-                  label: 'Transfer',
-                  onTap: () => _showComingSoon('Transfers'),
+                  icon: Icons.remove_rounded,
+                  label: 'Add expense',
+                  onTap: () => _addTransaction(),
                 ),
               ),
               const SizedBox(width: 12),
@@ -366,6 +670,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
             const SizedBox(height: 7),
             Text(
               label,
+              textAlign: TextAlign.center,
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 12,
@@ -408,10 +713,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
               Flexible(
                 child: Text(
                   title,
-                  style: const TextStyle(
-                    color: Colors.black54,
-                    fontSize: 13,
-                  ),
+                  style: const TextStyle(color: Colors.black54, fontSize: 13),
                 ),
               ),
             ],
@@ -430,7 +732,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
           ),
           const SizedBox(height: 4),
           const Text(
-            'MAD Â· This month',
+            'MAD · All transactions',
             style: TextStyle(color: Colors.black45, fontSize: 11),
           ),
         ],
@@ -439,7 +741,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
   }
 
   Widget _buildTransaction(Map<String, dynamic> transaction) {
-    final double amount = transaction['amount'] as double;
+    final double amount = (transaction['amount'] as num).toDouble();
     final bool isIncome = amount > 0;
 
     return Container(
@@ -462,7 +764,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
               borderRadius: BorderRadius.circular(15),
             ),
             child: Icon(
-              transaction['icon'] as IconData,
+              _iconFor(transaction['category'] as String),
               color: isIncome ? const Color(0xFF168866) : navy,
               size: 23,
             ),
@@ -483,25 +785,19 @@ class _WalletHomePageState extends State<WalletHomePage> {
                 const SizedBox(height: 5),
                 Text(
                   transaction['category'] as String,
-                  style: const TextStyle(
-                    color: Colors.black54,
-                    fontSize: 12,
-                  ),
+                  style: const TextStyle(color: Colors.black54, fontSize: 12),
                 ),
                 const SizedBox(height: 3),
                 Text(
                   transaction['date'] as String,
-                  style: const TextStyle(
-                    color: Colors.black38,
-                    fontSize: 11,
-                  ),
+                  style: const TextStyle(color: Colors.black38, fontSize: 11),
                 ),
               ],
             ),
           ),
           const SizedBox(width: 6),
           Text(
-            '${isIncome ? '+' : '-'}${amount.abs().toStringAsFixed(2)}',
+            '${isIncome ? '+' : '-'}${_money(amount)}',
             style: TextStyle(
               color: isIncome ? const Color(0xFF168866) : navy,
               fontWeight: FontWeight.w800,
@@ -516,7 +812,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
   Widget _buildOtherPage() {
     if (selectedIndex == 1) {
       return ListView(
-        padding: const EdgeInsets.all(22),
+        padding: const EdgeInsets.fromLTRB(22, 22, 22, 90),
         children: [
           const Text(
             'All activity',
@@ -527,13 +823,16 @@ class _WalletHomePageState extends State<WalletHomePage> {
             ),
           ),
           const SizedBox(height: 18),
-          ...transactions.map(_buildTransaction),
+          if (transactions.isEmpty)
+            const Text('No transactions yet. Tap + to add one.')
+          else
+            ...transactions.map(_buildTransaction),
         ],
       );
     }
 
     final String description = selectedIndex == 2
-        ? 'Your spending insights will appear here as your wallet develops.'
+        ? 'Your income and expenses are calculated from your saved transactions. More spending insights are coming soon.'
         : 'Your account settings and preferences will appear here.';
 
     return Padding(
@@ -582,4 +881,3 @@ class _WalletHomePageState extends State<WalletHomePage> {
     );
   }
 }
-
