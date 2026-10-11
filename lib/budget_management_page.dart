@@ -1,8 +1,9 @@
-﻿
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'transaction_utils.dart';
 
 const Color budgetNavy = Color(0xFF142B3B);
 const Color budgetGreen = Color(0xFF35C995);
@@ -26,14 +27,10 @@ const List<String> budgetCategories = [
 class BudgetManagementPage extends StatefulWidget {
   final List<Map<String, dynamic>> transactions;
 
-  const BudgetManagementPage({
-    super.key,
-    required this.transactions,
-  });
+  const BudgetManagementPage({super.key, required this.transactions});
 
   @override
-  State<BudgetManagementPage> createState() =>
-      _BudgetManagementPageState();
+  State<BudgetManagementPage> createState() => _BudgetManagementPageState();
 }
 
 class _BudgetManagementPageState extends State<BudgetManagementPage> {
@@ -70,51 +67,20 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
     await prefs.setString(budgetStorageKey, jsonEncode(budgets));
   }
 
-  DateTime? _transactionDate(dynamic value) {
-    if (value is DateTime) return value;
-
-    final text = value?.toString().trim() ?? '';
-    if (text.isEmpty) return null;
-
-    final now = DateTime.now();
-    final normalized = text.toLowerCase();
-
-    // Support sample transaction labels such as:
-    // "Today, 10:42 AM" and "Yesterday, 04:30 PM".
-    if (normalized == 'today' || normalized.startsWith('today,')) {
-      return now;
-    }
-
-    if (normalized == 'yesterday' ||
-        normalized.startsWith('yesterday,')) {
-      return now.subtract(const Duration(days: 1));
-    }
-
-    // Support ISO-formatted dates saved by the app.
-    return DateTime.tryParse(text);
-  }
-
   double _spentForCategory(String category) {
     final now = DateTime.now();
     double total = 0;
 
     for (final transaction in widget.transactions) {
-      final transactionCategory =
-          transaction['category']?.toString() ?? '';
+      final transactionCategory = transaction['category']?.toString() ?? '';
 
-      final rawAmount = transaction['amount'];
-      final amount = rawAmount is num
-          ? rawAmount.toDouble()
-          : double.tryParse(rawAmount?.toString() ?? '') ?? 0;
+      final amount = transactionAmount(transaction);
 
-      final date = _transactionDate(transaction['date']);
-      final isCurrentMonth = date != null &&
-          date.year == now.year &&
-          date.month == now.month;
+      final date = tryParseTransactionDate(transaction['date']);
+      final isCurrentMonth =
+          date != null && date.year == now.year && date.month == now.month;
 
-      if (transactionCategory == category &&
-          amount < 0 &&
-          isCurrentMonth) {
+      if (transactionCategory == category && amount < 0 && isCurrentMonth) {
         total += amount.abs();
       }
     }
@@ -122,9 +88,7 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
     return total;
   }
 
-  Future<void> _showBudgetDialog({
-    Map<String, dynamic>? existingBudget,
-  }) async {
+  Future<void> _showBudgetDialog({Map<String, dynamic>? existingBudget}) async {
     final isEditing = existingBudget != null;
     final formKey = GlobalKey<FormState>();
 
@@ -135,14 +99,11 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
     );
 
     String selectedCategory =
-        existingBudget?['category']?.toString() ??
-            budgetCategories.first;
+        existingBudget?['category']?.toString() ?? budgetCategories.first;
 
     final availableCategories = budgetCategories.where((category) {
       return category == selectedCategory ||
-          !budgets.any(
-            (budget) => budget['category']?.toString() == category,
-          );
+          !budgets.any((budget) => budget['category']?.toString() == category);
     }).toList();
 
     final result = await showDialog<Map<String, dynamic>>(
@@ -151,9 +112,7 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: Text(
-                isEditing ? 'Edit budget' : 'Create monthly budget',
-              ),
+              title: Text(isEditing ? 'Edit budget' : 'Create monthly budget'),
               content: Form(
                 key: formKey,
                 child: Column(
@@ -183,8 +142,7 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: amountController,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(
+                      keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
                       decoration: const InputDecoration(
@@ -193,13 +151,9 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
                         border: OutlineInputBorder(),
                       ),
                       validator: (value) {
-                        final amount = double.tryParse(
-                          value?.trim() ?? '',
-                        );
+                        final amount = double.tryParse(value?.trim() ?? '');
 
-                        if (amount == null ||
-                            !amount.isFinite ||
-                            amount <= 0) {
+                        if (amount == null || !amount.isFinite || amount <= 0) {
                           return 'Enter an amount greater than zero';
                         }
 
@@ -210,10 +164,7 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
                     const Text(
                       'Spending is calculated from expenses '
                       'recorded in the current month.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey,
-                      ),
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
                     ),
                   ],
                 ),
@@ -224,16 +175,13 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
                   child: const Text('Cancel'),
                 ),
                 FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: budgetNavy,
-                  ),
+                  style: FilledButton.styleFrom(backgroundColor: budgetNavy),
                   onPressed: () {
                     if (!formKey.currentState!.validate()) return;
 
                     Navigator.pop(dialogContext, {
                       'category': selectedCategory,
-                      'limit':
-                          double.parse(amountController.text.trim()),
+                      'limit': double.parse(amountController.text.trim()),
                     });
                   },
                   child: Text(isEditing ? 'Save changes' : 'Create'),
@@ -254,8 +202,7 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
     setState(() {
       if (isEditing) {
         final index = budgets.indexWhere(
-          (budget) =>
-              budget['category'] == existingBudget['category'],
+          (budget) => budget['category'] == existingBudget['category'],
         );
 
         if (index != -1) {
@@ -274,18 +221,14 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete budget?'),
-        content: Text(
-          'Remove the ${budget['category']} monthly budget?',
-        ),
+        content: Text('Remove the ${budget['category']} monthly budget?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Delete'),
           ),
@@ -296,16 +239,13 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
     if (confirm != true || !mounted) return;
 
     setState(() {
-      budgets.removeWhere(
-        (item) => item['category'] == budget['category'],
-      );
+      budgets.removeWhere((item) => item['category'] == budget['category']);
     });
 
     await _saveBudgets();
   }
 
-  String _money(double amount) =>
-      'MAD ${amount.toStringAsFixed(2)}';
+  String _money(double amount) => 'MAD ${amount.toStringAsFixed(2)}';
 
   Widget _buildBudgetAlert({
     required bool isOverBudget,
@@ -313,13 +253,12 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
     required double limit,
     required double left,
   }) {
-    final Color alertColor =
-        isOverBudget ? Colors.red : Colors.orange.shade900;
+    final Color alertColor = isOverBudget ? Colors.red : Colors.orange.shade900;
 
     final String message = isOverBudget
         ? 'Budget exceeded by ${_money(left.abs())}.'
         : 'Budget alert: you have used '
-            '${(spent / limit * 100).round()}% of this budget.';
+              '${(spent / limit * 100).round()}% of this budget.';
 
     return Container(
       width: double.infinity,
@@ -343,10 +282,7 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
           Expanded(
             child: Text(
               message,
-              style: TextStyle(
-                color: alertColor,
-                fontWeight: FontWeight.w600,
-              ),
+              style: TextStyle(color: alertColor, fontWeight: FontWeight.w600),
             ),
           ),
         ],
@@ -358,16 +294,13 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
   Widget build(BuildContext context) {
     final totalBudget = budgets.fold<double>(
       0,
-      (sum, budget) =>
-          sum + ((budget['limit'] as num?)?.toDouble() ?? 0),
+      (sum, budget) => sum + ((budget['limit'] as num?)?.toDouble() ?? 0),
     );
 
     final totalSpent = budgets.fold<double>(
       0,
       (sum, budget) =>
-          sum + _spentForCategory(
-            budget['category']?.toString() ?? 'Other',
-          ),
+          sum + _spentForCategory(budget['category']?.toString() ?? 'Other'),
     );
 
     final remaining = totalBudget - totalSpent;
@@ -393,10 +326,7 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
       appBar: AppBar(
         title: const Text(
           'Monthly Budgets',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         backgroundColor: budgetNavy,
         iconTheme: const IconThemeData(color: Colors.white),
@@ -523,11 +453,9 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
                   )
                 else
                   ...budgets.map((budget) {
-                    final category =
-                        budget['category']?.toString() ?? 'Other';
+                    final category = budget['category']?.toString() ?? 'Other';
 
-                    final limit =
-                        (budget['limit'] as num?)?.toDouble() ?? 0;
+                    final limit = (budget['limit'] as num?)?.toDouble() ?? 0;
 
                     final spent = _spentForCategory(category);
                     final left = limit - spent;
@@ -537,17 +465,17 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
                         : 0.0;
 
                     final isOverBudget = limit > 0 && spent > limit;
-                    final isNearlyOver =
-                        limit > 0 && spent >= limit * 0.8;
+                    final isNearlyOver = limit > 0 && spent >= limit * 0.8;
 
                     final Color progressColor = isOverBudget
                         ? Colors.red
                         : isNearlyOver
-                            ? Colors.orange
-                            : budgetGreen;
+                        ? Colors.orange
+                        : budgetGreen;
 
-                    final percentage =
-                        limit > 0 ? (spent / limit * 100).round() : 0;
+                    final percentage = limit > 0
+                        ? (spent / limit * 100).round()
+                        : 0;
 
                     return Card(
                       color: Colors.white,
@@ -567,11 +495,8 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
                                   width: 44,
                                   height: 44,
                                   decoration: BoxDecoration(
-                                    color: budgetGreen.withValues(
-                                      alpha: 0.15,
-                                    ),
-                                    borderRadius:
-                                        BorderRadius.circular(12),
+                                    color: budgetGreen.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: const Icon(
                                     Icons.account_balance_wallet,
@@ -591,9 +516,7 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
                                 PopupMenuButton<String>(
                                   onSelected: (value) {
                                     if (value == 'edit') {
-                                      _showBudgetDialog(
-                                        existingBudget: budget,
-                                      );
+                                      _showBudgetDialog(existingBudget: budget);
                                     } else if (value == 'delete') {
                                       _deleteBudget(budget);
                                     }
@@ -613,8 +536,7 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
                             ),
                             const SizedBox(height: 16),
                             Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.spaceBetween,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(
                                   _money(spent),
@@ -625,9 +547,7 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
                                 ),
                                 Text(
                                   'of ${_money(limit)}',
-                                  style: const TextStyle(
-                                    color: Colors.black54,
-                                  ),
+                                  style: const TextStyle(color: Colors.black54),
                                 ),
                               ],
                             ),
@@ -637,10 +557,8 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
                               child: LinearProgressIndicator(
                                 value: progress,
                                 minHeight: 9,
-                                backgroundColor:
-                                    Colors.grey.shade200,
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(
+                                backgroundColor: Colors.grey.shade200,
+                                valueColor: AlwaysStoppedAnimation<Color>(
                                   progressColor,
                                 ),
                               ),
@@ -657,8 +575,8 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
                                       color: isOverBudget
                                           ? Colors.red
                                           : isNearlyOver
-                                              ? Colors.orange.shade800
-                                              : Colors.black54,
+                                          ? Colors.orange.shade800
+                                          : Colors.black54,
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
@@ -708,10 +626,7 @@ class _SummaryItem extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(color: Colors.white70),
-        ),
+        Text(label, style: const TextStyle(color: Colors.white70)),
         const SizedBox(height: 6),
         Text(
           value,

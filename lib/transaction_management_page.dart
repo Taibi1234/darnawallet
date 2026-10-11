@@ -1,4 +1,6 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+
+import 'transaction_utils.dart';
 
 const Color transactionNavy = Color(0xFF142B3B);
 const Color transactionGreen = Color(0xFF35C995);
@@ -25,15 +27,14 @@ class _TransactionManagementPageState extends State<TransactionManagementPage> {
 
   String _typeFilter = 'All';
   String? _categoryFilter;
+  String _dateFilter = 'All time';
+  DateTime? _rangeStart;
+  DateTime? _rangeEnd;
 
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
-  }
-
-  double _amount(Map<String, dynamic> transaction) {
-    return (transaction['amount'] as num).toDouble();
   }
 
   List<String> get _categories {
@@ -46,13 +47,57 @@ class _TransactionManagementPageState extends State<TransactionManagementPage> {
     return categories;
   }
 
+  bool _matchesDateFilter(Map<String, dynamic> transaction) {
+    return isInDateFilter(
+      tryParseTransactionDate(transaction['date']),
+      _dateFilter,
+      rangeStart: _rangeStart,
+      rangeEnd: _rangeEnd,
+    );
+  }
+
+  Future<bool> _pickDateRange() async {
+    final now = DateTime.now();
+    final initialStart = DateTime(now.year, now.month, 1);
+    final initialEnd = DateTime(now.year, now.month, now.day);
+
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(now.year + 10),
+      initialDateRange: DateTimeRange(
+        start: _rangeStart ?? initialStart,
+        end: _rangeEnd ?? initialEnd,
+      ),
+    );
+
+    if (picked == null || !mounted) return false;
+
+    setState(() {
+      _rangeStart = DateTime(
+        picked.start.year,
+        picked.start.month,
+        picked.start.day,
+      );
+      _rangeEnd = DateTime(picked.end.year, picked.end.month, picked.end.day);
+    });
+
+    return true;
+  }
+
+  String _displayDate(DateTime date) {
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '${date.year}-$month-$day';
+  }
+
   List<Map<String, dynamic>> get _filteredTransactions {
     final query = _searchController.text.trim().toLowerCase();
 
     return widget.transactions.where((transaction) {
       final title = transaction['title'].toString().toLowerCase();
       final category = transaction['category'].toString().toLowerCase();
-      final amount = _amount(transaction);
+      final amount = transactionAmount(transaction);
 
       final matchesSearch =
           query.isEmpty || title.contains(query) || category.contains(query);
@@ -67,23 +112,10 @@ class _TransactionManagementPageState extends State<TransactionManagementPage> {
           _categoryFilter == null ||
           transaction['category'].toString() == _categoryFilter;
 
-      return matchesSearch && matchesType && matchesCategory;
+      final matchesDate = _matchesDateFilter(transaction);
+
+      return matchesSearch && matchesType && matchesCategory && matchesDate;
     }).toList();
-  }
-
-  String _money(double amount) {
-    final parts = amount.abs().toStringAsFixed(2).split('.');
-    final digits = parts[0];
-    final buffer = StringBuffer();
-
-    for (int i = 0; i < digits.length; i++) {
-      if (i > 0 && (digits.length - i) % 3 == 0) {
-        buffer.write(',');
-      }
-      buffer.write(digits[i]);
-    }
-
-    return '${buffer.toString()}.${parts[1]}';
   }
 
   IconData _iconFor(String category) {
@@ -146,14 +178,17 @@ class _TransactionManagementPageState extends State<TransactionManagementPage> {
     final filtered = _filteredTransactions;
     final categories = _categories;
     final totalIncome = filtered
-        .where((transaction) => _amount(transaction) > 0)
-        .fold<double>(0, (sum, transaction) => sum + _amount(transaction));
-
-    final totalExpenses = filtered
-        .where((transaction) => _amount(transaction) < 0)
+        .where((transaction) => transactionAmount(transaction) > 0)
         .fold<double>(
           0,
-          (sum, transaction) => sum + _amount(transaction).abs(),
+          (sum, transaction) => sum + transactionAmount(transaction),
+        );
+
+    final totalExpenses = filtered
+        .where((transaction) => transactionAmount(transaction) < 0)
+        .fold<double>(
+          0,
+          (sum, transaction) => sum + transactionAmount(transaction).abs(),
         );
 
     final netAmount = totalIncome - totalExpenses;
@@ -201,7 +236,7 @@ class _TransactionManagementPageState extends State<TransactionManagementPage> {
                   Expanded(
                     child: _buildSummaryItem(
                       'Income',
-                      '+${_money(totalIncome)}',
+                      '+${formatMoney(totalIncome)}',
                       const Color(0xFF168866),
                     ),
                   ),
@@ -209,7 +244,7 @@ class _TransactionManagementPageState extends State<TransactionManagementPage> {
                   Expanded(
                     child: _buildSummaryItem(
                       'Expenses',
-                      _money(totalExpenses),
+                      formatMoney(totalExpenses),
                       transactionNavy,
                     ),
                   ),
@@ -217,7 +252,7 @@ class _TransactionManagementPageState extends State<TransactionManagementPage> {
                   Expanded(
                     child: _buildSummaryItem(
                       'Net',
-                      '${netAmount >= 0 ? '+' : '-'}${_money(netAmount)}',
+                      '${netAmount >= 0 ? '+' : '-'}${formatMoney(netAmount)}',
                       netAmount >= 0
                           ? const Color(0xFF168866)
                           : Colors.red.shade700,
@@ -318,6 +353,62 @@ class _TransactionManagementPageState extends State<TransactionManagementPage> {
             setState(() => _categoryFilter = value);
           },
         ),
+        const SizedBox(height: 16),
+
+        DropdownButtonFormField<String>(
+          initialValue: _dateFilter,
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: 'Filter by date',
+            prefixIcon: const Icon(Icons.calendar_month_outlined),
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+          ),
+          items: const [
+            DropdownMenuItem(value: 'All time', child: Text('All time')),
+            DropdownMenuItem(value: 'Today', child: Text('Today')),
+            DropdownMenuItem(value: 'This week', child: Text('This week')),
+            DropdownMenuItem(value: 'This month', child: Text('This month')),
+            DropdownMenuItem(
+              value: 'Custom range',
+              child: Text('Custom date range'),
+            ),
+          ],
+          onChanged: (value) async {
+            if (value == null) return;
+
+            if (value == 'Custom range') {
+              final picked = await _pickDateRange();
+
+              if (!mounted) return;
+
+              // A cancelled picker must not leave the list filtered by an
+              // empty range, so fall back to showing everything.
+              if (!picked && _rangeStart == null) {
+                setState(() => _dateFilter = 'All time');
+                return;
+              }
+            }
+
+            setState(() => _dateFilter = value);
+          },
+        ),
+
+        if (_dateFilter == 'Custom range')
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: _pickDateRange,
+              icon: const Icon(Icons.date_range),
+              label: Text(
+                _rangeStart == null || _rangeEnd == null
+                    ? 'Choose start and end dates'
+                    : '${_displayDate(_rangeStart!)} – ${_displayDate(_rangeEnd!)}',
+              ),
+            ),
+          ),
+
         const SizedBox(height: 18),
 
         Row(
@@ -379,10 +470,7 @@ class _TransactionManagementPageState extends State<TransactionManagementPage> {
       children: [
         Text(
           label,
-          style: const TextStyle(
-            color: Colors.black54,
-            fontSize: 11,
-          ),
+          style: const TextStyle(color: Colors.black54, fontSize: 11),
         ),
         const SizedBox(height: 6),
         SizedBox(
@@ -404,8 +492,9 @@ class _TransactionManagementPageState extends State<TransactionManagementPage> {
       ],
     );
   }
+
   Widget _buildTransactionCard(Map<String, dynamic> transaction) {
-    final amount = _amount(transaction);
+    final amount = transactionAmount(transaction);
     final isIncome = amount > 0;
 
     return Container(
@@ -457,7 +546,7 @@ class _TransactionManagementPageState extends State<TransactionManagementPage> {
                 ),
                 const SizedBox(height: 5),
                 Text(
-                  '${isIncome ? '+' : '-'}${_money(amount)} MAD',
+                  '${isIncome ? '+' : '-'}${formatMoney(amount)} MAD',
                   style: TextStyle(
                     color: isIncome ? const Color(0xFF168866) : transactionNavy,
                     fontSize: 13,
@@ -508,4 +597,3 @@ class _TransactionManagementPageState extends State<TransactionManagementPage> {
     );
   }
 }
-

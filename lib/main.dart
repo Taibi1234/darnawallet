@@ -1,10 +1,11 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'statistics_dashboard.dart';
 import 'transaction_management_page.dart';
+import 'transaction_utils.dart';
 import 'budget_management_page.dart';
 
 void main() {
@@ -80,16 +81,9 @@ class _WalletHomePageState extends State<WalletHomePage> {
     },
   ];
 
-  double get totalIncome => transactions.fold<double>(0, (total, transaction) {
-    final amount = (transaction['amount'] as num).toDouble();
-    return total + (amount > 0 ? amount : 0);
-  });
+  double get totalIncome => totalIncomeOf(transactions);
 
-  double get totalExpenses =>
-      transactions.fold<double>(0, (total, transaction) {
-        final amount = (transaction['amount'] as num).toDouble();
-        return total + (amount < 0 ? amount.abs() : 0);
-      });
+  double get totalExpenses => totalExpensesOf(transactions);
 
   double get balance => openingBalance + totalIncome - totalExpenses;
 
@@ -166,21 +160,6 @@ class _WalletHomePageState extends State<WalletHomePage> {
   Future<void> _saveTransactions() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(storageKey, jsonEncode(transactions));
-  }
-
-  String _money(double amount) {
-    final parts = amount.abs().toStringAsFixed(2).split('.');
-    final digits = parts[0];
-    final buffer = StringBuffer();
-
-    for (int i = 0; i < digits.length; i++) {
-      if (i > 0 && (digits.length - i) % 3 == 0) {
-        buffer.write(',');
-      }
-      buffer.write(digits[i]);
-    }
-
-    return '${buffer.toString()}.${parts[1]}';
   }
 
   IconData _iconFor(String category) {
@@ -343,7 +322,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
                       'title': title,
                       'category': category,
                       'amount': isIncome ? amount : -amount,
-                      'date': 'Added just now',
+                      'date': DateTime.now().toIso8601String(),
                     });
                   },
                   child: const Text('Save transaction'),
@@ -785,7 +764,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
             Expanded(
               child: _buildSummaryCard(
                 title: 'Income',
-                amount: '+${_money(totalIncome)}',
+                amount: '+${formatMoney(totalIncome)}',
                 icon: Icons.arrow_downward_rounded,
                 color: green,
               ),
@@ -794,7 +773,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
             Expanded(
               child: _buildSummaryCard(
                 title: 'Expenses',
-                amount: '-${_money(totalExpenses)}',
+                amount: '-${formatMoney(totalExpenses)}',
                 icon: Icons.arrow_upward_rounded,
                 color: const Color(0xFFE78383),
               ),
@@ -836,7 +815,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
         const SizedBox(height: 16),
         const Center(
           child: Text(
-            'Demo data Â· No real money is involved',
+            'Demo data · No real money is involved',
             style: TextStyle(color: Colors.black45, fontSize: 12),
           ),
         ),
@@ -873,7 +852,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
           FittedBox(
             fit: BoxFit.scaleDown,
             child: Text(
-              'MAD ${_money(balance)}',
+              'MAD ${formatMoney(balance)}',
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 34,
@@ -998,7 +977,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
           ),
           const SizedBox(height: 4),
           const Text(
-            'MAD Â· All transactions',
+            'MAD · All transactions',
             style: TextStyle(color: Colors.black45, fontSize: 11),
           ),
         ],
@@ -1063,7 +1042,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
           ),
           const SizedBox(width: 6),
           Text(
-            '${isIncome ? '+' : '-'}${_money(amount)}',
+            '${isIncome ? '+' : '-'}${formatMoney(amount)}',
             style: TextStyle(
               color: isIncome ? const Color(0xFF168866) : navy,
               fontWeight: FontWeight.w800,
@@ -1089,9 +1068,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
     }
 
     if (selectedIndex == 3) {
-      return BudgetManagementPage(
-        transactions: transactions,
-      );
+      return BudgetManagementPage(transactions: transactions);
     }
 
     const String description =
@@ -1137,5 +1114,3 @@ class _WalletHomePageState extends State<WalletHomePage> {
     );
   }
 }
-
-

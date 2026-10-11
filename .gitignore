@@ -46,3 +46,16 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Local backup copies created during development
+*.bak
+*.backup
+*-backup
+
+# Secrets, signing keys, and local environment files
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+key.properties

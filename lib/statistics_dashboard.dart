@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'transaction_utils.dart';
+
 const Color statsNavy = Color(0xFF142B3B);
 const Color statsGreen = Color(0xFF35C995);
 const Color statsBackground = Color(0xFFF5F7F9);
@@ -10,29 +12,15 @@ class StatisticsDashboard extends StatelessWidget {
 
   final List<Map<String, dynamic>> transactions;
 
-  double _amount(Map<String, dynamic> transaction) {
-    return (transaction['amount'] as num).toDouble();
-  }
+  double get totalIncome => totalIncomeOf(transactions);
 
-  double get totalIncome {
-    return transactions.fold<double>(0, (total, transaction) {
-      final amount = _amount(transaction);
-      return total + (amount > 0 ? amount : 0);
-    });
-  }
-
-  double get totalExpenses {
-    return transactions.fold<double>(0, (total, transaction) {
-      final amount = _amount(transaction);
-      return total + (amount < 0 ? amount.abs() : 0);
-    });
-  }
+  double get totalExpenses => totalExpensesOf(transactions);
 
   Map<String, double> get expensesByCategory {
     final result = <String, double>{};
 
     for (final transaction in transactions) {
-      final amount = _amount(transaction);
+      final amount = transactionAmount(transaction);
 
       if (amount >= 0) continue;
 
@@ -44,20 +32,12 @@ class StatisticsDashboard extends StatelessWidget {
     return result;
   }
 
+  // Undatable legacy records count toward the current month so they stay
+  // visible in the charts; the UI copy below explains this to the user.
   DateTime _transactionDate(Map<String, dynamic> transaction) {
-    final rawDate = transaction['date']?.toString().trim() ?? '';
-    final normalized = rawDate.toLowerCase();
     final now = DateTime.now();
-
-    if (normalized == 'today' || normalized.startsWith('today,')) {
-      return DateTime(now.year, now.month, now.day);
-    }
-
-    if (normalized == 'yesterday' || normalized.startsWith('yesterday,')) {
-      return DateTime(now.year, now.month, now.day - 1);
-    }
-
-    return DateTime.tryParse(rawDate) ?? DateTime(now.year, now.month, now.day);
+    return tryParseTransactionDate(transaction['date'], now: now) ??
+        DateTime(now.year, now.month, now.day);
   }
 
   List<MonthlyTotal> get monthlyTotals {
@@ -77,7 +57,7 @@ class StatisticsDashboard extends StatelessWidget {
           continue;
         }
 
-        final amount = _amount(transaction);
+        final amount = transactionAmount(transaction);
 
         if (amount > 0) {
           income += amount;
@@ -113,28 +93,13 @@ class StatisticsDashboard extends StatelessWidget {
     return names[month - 1];
   }
 
-  String _money(double amount) {
-    final parts = amount.abs().toStringAsFixed(2).split('.');
-    final digits = parts[0];
-    final buffer = StringBuffer();
-
-    for (int i = 0; i < digits.length; i++) {
-      if (i > 0 && (digits.length - i) % 3 == 0) {
-        buffer.write(',');
-      }
-      buffer.write(digits[i]);
-    }
-
-    return '${buffer.toString()}.${parts[1]}';
-  }
-
   @override
   Widget build(BuildContext context) {
     final categories = expensesByCategory.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
     final expenseTransactionCount = transactions
-        .where((t) => _amount(t) < 0)
+        .where((t) => transactionAmount(t) < 0)
         .length;
 
     final months = monthlyTotals;
@@ -169,7 +134,7 @@ class StatisticsDashboard extends StatelessWidget {
             Expanded(
               child: _SummaryCard(
                 title: 'Total income',
-                amount: _money(totalIncome),
+                amount: formatMoney(totalIncome),
                 color: statsGreen,
                 icon: Icons.trending_up_rounded,
               ),
@@ -178,7 +143,7 @@ class StatisticsDashboard extends StatelessWidget {
             Expanded(
               child: _SummaryCard(
                 title: 'Total expenses',
-                amount: _money(totalExpenses),
+                amount: formatMoney(totalExpenses),
                 color: statsRed,
                 icon: Icons.trending_down_rounded,
               ),
@@ -201,7 +166,7 @@ class StatisticsDashboard extends StatelessWidget {
                     ? totalIncome
                     : totalExpenses,
                 color: statsGreen,
-                money: _money,
+                money: formatMoney,
               ),
               const SizedBox(height: 20),
               _ComparisonBar(
@@ -211,7 +176,7 @@ class StatisticsDashboard extends StatelessWidget {
                     ? totalIncome
                     : totalExpenses,
                 color: statsRed,
-                money: _money,
+                money: formatMoney,
               ),
               const SizedBox(height: 18),
               Container(
@@ -238,7 +203,7 @@ class StatisticsDashboard extends StatelessWidget {
                     ),
                     Flexible(
                       child: Text(
-                        '${totalIncome >= totalExpenses ? '+' : '-'}${_money((totalIncome - totalExpenses).abs())} MAD',
+                        '${totalIncome >= totalExpenses ? '+' : '-'}${formatMoney((totalIncome - totalExpenses).abs())} MAD',
                         textAlign: TextAlign.end,
                         style: TextStyle(
                           color: totalIncome >= totalExpenses
@@ -296,7 +261,7 @@ class StatisticsDashboard extends StatelessWidget {
                                 ),
                                 const SizedBox(width: 10),
                                 Text(
-                                  '${_money(entry.value)} MAD',
+                                  '${formatMoney(entry.value)} MAD',
                                   style: const TextStyle(
                                     color: statsNavy,
                                     fontWeight: FontWeight.w700,
@@ -414,19 +379,21 @@ class StatisticsDashboard extends StatelessWidget {
               const Divider(height: 24),
               _InfoRow(
                 label: 'Income transactions',
-                value: '${transactions.where((t) => _amount(t) > 0).length}',
+                value:
+                    '${transactions.where((t) => transactionAmount(t) > 0).length}',
               ),
               const Divider(height: 24),
               _InfoRow(
                 label: 'Expense transactions',
-                value: '${transactions.where((t) => _amount(t) < 0).length}',
+                value:
+                    '${transactions.where((t) => transactionAmount(t) < 0).length}',
               ),
               const Divider(height: 24),
               _InfoRow(
                 label: 'Average expense',
                 value: expenseTransactionCount == 0
                     ? '0.00 MAD'
-                    : '${_money(totalExpenses / expenseTransactionCount)} MAD',
+                    : '${formatMoney(totalExpenses / expenseTransactionCount)} MAD',
               ),
             ],
           ),
