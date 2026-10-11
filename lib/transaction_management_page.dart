@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 const Color transactionNavy = Color(0xFF142B3B);
 const Color transactionGreen = Color(0xFF35C995);
@@ -145,6 +145,18 @@ class _TransactionManagementPageState extends State<TransactionManagementPage> {
   Widget build(BuildContext context) {
     final filtered = _filteredTransactions;
     final categories = _categories;
+    final totalIncome = filtered
+        .where((transaction) => _amount(transaction) > 0)
+        .fold<double>(0, (sum, transaction) => sum + _amount(transaction));
+
+    final totalExpenses = filtered
+        .where((transaction) => _amount(transaction) < 0)
+        .fold<double>(
+          0,
+          (sum, transaction) => sum + _amount(transaction).abs(),
+        );
+
+    final netAmount = totalIncome - totalExpenses;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(22, 22, 22, 100),
@@ -164,6 +176,63 @@ class _TransactionManagementPageState extends State<TransactionManagementPage> {
         ),
         const SizedBox(height: 20),
 
+        Container(
+          margin: const EdgeInsets.only(bottom: 20),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0xFFEBEFF2)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Filtered summary',
+                style: TextStyle(
+                  color: transactionNavy,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildSummaryItem(
+                      'Income',
+                      '+${_money(totalIncome)}',
+                      const Color(0xFF168866),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _buildSummaryItem(
+                      'Expenses',
+                      _money(totalExpenses),
+                      transactionNavy,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _buildSummaryItem(
+                      'Net',
+                      '${netAmount >= 0 ? '+' : '-'}${_money(netAmount)}',
+                      netAmount >= 0
+                          ? const Color(0xFF168866)
+                          : Colors.red.shade700,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              const Text(
+                'Amounts in MAD; based on current search and filters.',
+                style: TextStyle(color: Colors.black45, fontSize: 11),
+              ),
+            ],
+          ),
+        ),
         // Search field.
         TextField(
           controller: _searchController,
@@ -304,6 +373,37 @@ class _TransactionManagementPageState extends State<TransactionManagementPage> {
     );
   }
 
+  Widget _buildSummaryItem(String label, String amount, Color color) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: Colors.black54,
+            fontSize: 11,
+          ),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          width: double.infinity,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              amount,
+              maxLines: 1,
+              style: TextStyle(
+                color: color,
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
   Widget _buildTransactionCard(Map<String, dynamic> transaction) {
     final amount = _amount(transaction);
     final isIncome = amount > 0;
@@ -408,3 +508,4 @@ class _TransactionManagementPageState extends State<TransactionManagementPage> {
     );
   }
 }
+
