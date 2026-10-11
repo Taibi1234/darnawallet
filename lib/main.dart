@@ -1,10 +1,11 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'statistics_dashboard.dart';
 import 'transaction_management_page.dart';
+import 'budget_management_page.dart';
 
 void main() {
   runApp(const DarnaWalletApp());
@@ -99,6 +100,8 @@ class _WalletHomePageState extends State<WalletHomePage> {
       case 2:
         return 'Statistics';
       case 3:
+        return 'Budgets';
+      case 4:
         return 'My profile';
       default:
         return 'My wallet';
@@ -734,6 +737,11 @@ class _WalletHomePageState extends State<WalletHomePage> {
             label: 'Statistics',
           ),
           NavigationDestination(
+            icon: Icon(Icons.account_balance_wallet_outlined),
+            selectedIcon: Icon(Icons.account_balance_wallet_rounded),
+            label: 'Budgets',
+          ),
+          NavigationDestination(
             icon: Icon(Icons.person_outline_rounded),
             selectedIcon: Icon(Icons.person_rounded),
             label: 'Profile',
@@ -828,7 +836,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
         const SizedBox(height: 16),
         const Center(
           child: Text(
-            'Demo data · No real money is involved',
+            'Demo data Â· No real money is involved',
             style: TextStyle(color: Colors.black45, fontSize: 12),
           ),
         ),
@@ -990,7 +998,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
           ),
           const SizedBox(height: 4),
           const Text(
-            'MAD · All transactions',
+            'MAD Â· All transactions',
             style: TextStyle(color: Colors.black45, fontSize: 11),
           ),
         ],
@@ -1080,6 +1088,12 @@ class _WalletHomePageState extends State<WalletHomePage> {
       return StatisticsDashboard(transactions: transactions);
     }
 
+    if (selectedIndex == 3) {
+      return BudgetManagementPage(
+        transactions: transactions,
+      );
+    }
+
     const String description =
         'Your account settings and preferences will appear here.';
 
@@ -1123,3 +1137,5 @@ class _WalletHomePageState extends State<WalletHomePage> {
     );
   }
 }
+
+
