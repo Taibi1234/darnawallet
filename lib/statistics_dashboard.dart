@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 const Color statsNavy = Color(0xFF142B3B);
@@ -7,10 +6,7 @@ const Color statsBackground = Color(0xFFF5F7F9);
 const Color statsRed = Color(0xFFE78383);
 
 class StatisticsDashboard extends StatelessWidget {
-  const StatisticsDashboard({
-    super.key,
-    required this.transactions,
-  });
+  const StatisticsDashboard({super.key, required this.transactions});
 
   final List<Map<String, dynamic>> transactions;
 
@@ -19,23 +15,17 @@ class StatisticsDashboard extends StatelessWidget {
   }
 
   double get totalIncome {
-    return transactions.fold<double>(
-      0,
-      (total, transaction) {
-        final amount = _amount(transaction);
-        return total + (amount > 0 ? amount : 0);
-      },
-    );
+    return transactions.fold<double>(0, (total, transaction) {
+      final amount = _amount(transaction);
+      return total + (amount > 0 ? amount : 0);
+    });
   }
 
   double get totalExpenses {
-    return transactions.fold<double>(
-      0,
-      (total, transaction) {
-        final amount = _amount(transaction);
-        return total + (amount < 0 ? amount.abs() : 0);
-      },
-    );
+    return transactions.fold<double>(0, (total, transaction) {
+      final amount = _amount(transaction);
+      return total + (amount < 0 ? amount.abs() : 0);
+    });
   }
 
   Map<String, double> get expensesByCategory {
@@ -46,23 +36,28 @@ class StatisticsDashboard extends StatelessWidget {
 
       if (amount >= 0) continue;
 
-      final category =
-          transaction['category']?.toString() ?? 'Other';
+      final category = transaction['category']?.toString() ?? 'Other';
 
-      result[category] =
-          (result[category] ?? 0) + amount.abs();
+      result[category] = (result[category] ?? 0) + amount.abs();
     }
 
     return result;
   }
 
   DateTime _transactionDate(Map<String, dynamic> transaction) {
-    final rawDate = transaction['date']?.toString() ?? '';
+    final rawDate = transaction['date']?.toString().trim() ?? '';
+    final normalized = rawDate.toLowerCase();
+    final now = DateTime.now();
 
-    // Older demo records use labels such as "Today" and
-    // "Yesterday", so treat those records as belonging to
-    // the current month until real dates are available.
-    return DateTime.tryParse(rawDate) ?? DateTime.now();
+    if (normalized == 'today' || normalized.startsWith('today,')) {
+      return DateTime(now.year, now.month, now.day);
+    }
+
+    if (normalized == 'yesterday' || normalized.startsWith('yesterday,')) {
+      return DateTime(now.year, now.month, now.day - 1);
+    }
+
+    return DateTime.tryParse(rawDate) ?? DateTime(now.year, now.month, now.day);
   }
 
   List<MonthlyTotal> get monthlyTotals {
@@ -78,8 +73,7 @@ class StatisticsDashboard extends StatelessWidget {
       for (final transaction in transactions) {
         final date = _transactionDate(transaction);
 
-        if (date.year != monthDate.year ||
-            date.month != monthDate.month) {
+        if (date.year != monthDate.year || date.month != monthDate.month) {
           continue;
         }
 
@@ -102,8 +96,18 @@ class StatisticsDashboard extends StatelessWidget {
 
   String _monthName(int month) {
     const names = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
 
     return names[month - 1];
@@ -129,16 +133,17 @@ class StatisticsDashboard extends StatelessWidget {
     final categories = expensesByCategory.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
+    final expenseTransactionCount = transactions
+        .where((t) => _amount(t) < 0)
+        .length;
+
     final months = monthlyTotals;
-    final maxMonthlyValue = months.fold<double>(
-      0,
-      (maximum, month) {
-        final largest = month.income > month.expenses
-            ? month.income
-            : month.expenses;
-        return largest > maximum ? largest : maximum;
-      },
-    );
+    final maxMonthlyValue = months.fold<double>(0, (maximum, month) {
+      final largest = month.income > month.expenses
+          ? month.income
+          : month.expenses;
+      return largest > maximum ? largest : maximum;
+    });
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(22, 22, 22, 32),
@@ -154,10 +159,7 @@ class StatisticsDashboard extends StatelessWidget {
         const SizedBox(height: 6),
         const Text(
           'Understand where your money goes.',
-          style: TextStyle(
-            color: Colors.black54,
-            fontSize: 14,
-          ),
+          style: TextStyle(color: Colors.black54, fontSize: 14),
         ),
         const SizedBox(height: 22),
 
@@ -332,15 +334,9 @@ class StatisticsDashboard extends StatelessWidget {
               const Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  _LegendDot(
-                    color: statsGreen,
-                    label: 'Income',
-                  ),
+                  _LegendDot(color: statsGreen, label: 'Income'),
                   SizedBox(width: 20),
-                  _LegendDot(
-                    color: statsRed,
-                    label: 'Expenses',
-                  ),
+                  _LegendDot(color: statsRed, label: 'Expenses'),
                 ],
               ),
               const SizedBox(height: 24),
@@ -398,10 +394,7 @@ class StatisticsDashboard extends StatelessWidget {
                 'Older demo transactions without calendar dates are '
                 'assigned to the current month.',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.black45,
-                  fontSize: 11,
-                ),
+                style: TextStyle(color: Colors.black45, fontSize: 11),
               ),
             ],
           ),
@@ -431,9 +424,9 @@ class StatisticsDashboard extends StatelessWidget {
               const Divider(height: 24),
               _InfoRow(
                 label: 'Average expense',
-                value: totalExpenses == 0
+                value: expenseTransactionCount == 0
                     ? '0.00 MAD'
-                    : '${_money(totalExpenses / transactions.where((t) => _amount(t) < 0).length)} MAD',
+                    : '${_money(totalExpenses / expenseTransactionCount)} MAD',
               ),
             ],
           ),
@@ -443,10 +436,7 @@ class StatisticsDashboard extends StatelessWidget {
         const Center(
           child: Text(
             'DarnaWallet · Demo financial data',
-            style: TextStyle(
-              color: Colors.black45,
-              fontSize: 12,
-            ),
+            style: TextStyle(color: Colors.black45, fontSize: 12),
           ),
         ),
       ],
@@ -511,10 +501,7 @@ class _SummaryCard extends StatelessWidget {
           const SizedBox(height: 12),
           Text(
             title,
-            style: const TextStyle(
-              color: Colors.black54,
-              fontSize: 12,
-            ),
+            style: const TextStyle(color: Colors.black54, fontSize: 12),
           ),
           const SizedBox(height: 6),
           FittedBox(
@@ -532,10 +519,7 @@ class _SummaryCard extends StatelessWidget {
           const SizedBox(height: 4),
           const Text(
             'MAD',
-            style: TextStyle(
-              color: Colors.black45,
-              fontSize: 11,
-            ),
+            style: TextStyle(color: Colors.black45, fontSize: 11),
           ),
         ],
       ),
@@ -577,10 +561,7 @@ class _SectionCard extends StatelessWidget {
           const SizedBox(height: 5),
           Text(
             subtitle,
-            style: const TextStyle(
-              color: Colors.black54,
-              fontSize: 12,
-            ),
+            style: const TextStyle(color: Colors.black54, fontSize: 12),
           ),
           const SizedBox(height: 24),
           child,
@@ -607,9 +588,7 @@ class _ComparisonBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final progress = maximum <= 0
-        ? 0.0
-        : (amount / maximum).clamp(0.0, 1.0);
+    final progress = maximum <= 0 ? 0.0 : (amount / maximum).clamp(0.0, 1.0);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -662,9 +641,7 @@ class _MonthBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ratio = maximum <= 0
-        ? 0.0
-        : (value / maximum).clamp(0.0, 1.0);
+    final ratio = maximum <= 0 ? 0.0 : (value / maximum).clamp(0.0, 1.0);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -674,7 +651,9 @@ class _MonthBar extends StatelessWidget {
           alignment: Alignment.bottomCenter,
           child: Container(
             width: double.infinity,
-            height: value == 0 ? 0 : barHeight.clamp(3.0, constraints.maxHeight),
+            height: value == 0
+                ? 0
+                : barHeight.clamp(3.0, constraints.maxHeight),
             decoration: BoxDecoration(
               color: color,
               borderRadius: const BorderRadius.vertical(
@@ -689,10 +668,7 @@ class _MonthBar extends StatelessWidget {
 }
 
 class _LegendDot extends StatelessWidget {
-  const _LegendDot({
-    required this.color,
-    required this.label,
-  });
+  const _LegendDot({required this.color, required this.label});
 
   final Color color;
   final String label;
@@ -712,10 +688,7 @@ class _LegendDot extends StatelessWidget {
         const SizedBox(width: 6),
         Text(
           label,
-          style: const TextStyle(
-            color: Colors.black54,
-            fontSize: 12,
-          ),
+          style: const TextStyle(color: Colors.black54, fontSize: 12),
         ),
       ],
     );
@@ -723,10 +696,7 @@ class _LegendDot extends StatelessWidget {
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({
-    required this.label,
-    required this.value,
-  });
+  const _InfoRow({required this.label, required this.value});
 
   final String label;
   final String value;
@@ -738,10 +708,7 @@ class _InfoRow extends StatelessWidget {
         Expanded(
           child: Text(
             label,
-            style: const TextStyle(
-              color: Colors.black54,
-              fontSize: 13,
-            ),
+            style: const TextStyle(color: Colors.black54, fontSize: 13),
           ),
         ),
         Flexible(
@@ -761,9 +728,7 @@ class _InfoRow extends StatelessWidget {
 }
 
 class _EmptyMessage extends StatelessWidget {
-  const _EmptyMessage({
-    required this.message,
-  });
+  const _EmptyMessage({required this.message});
 
   final String message;
 
@@ -781,4 +746,3 @@ class _EmptyMessage extends StatelessWidget {
     );
   }
 }
-
