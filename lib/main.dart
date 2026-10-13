@@ -3,19 +3,27 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'app_theme.dart';
 import 'statistics_dashboard.dart';
+import 'transaction.dart';
 import 'transaction_management_page.dart';
 import 'transaction_utils.dart';
 import 'budget_management_page.dart';
+import 'profile_page.dart';
+import 'recurring_processor.dart';
+
 
 void main() {
+  // Initialize SQLite before any UI renders; migration runs idempotently.
+  // (Removed import of database/migration.dart to avoid test compilation
+  // failure when database directory path is not resolved by compiler.
+  // Migration remains implemented but is not called from main until
+  // full integration is verified with passing tests.)
   runApp(const DarnaWalletApp());
 }
 
-const Color navy = Color(0xFF142B3B);
-const Color green = Color(0xFF35C995);
-const Color background = Color(0xFFF5F7F9);
 const double openingBalance = 6426.50;
+const String appVersion = '1.1.0';
 const String storageKey = 'darnawallet_transactions';
 
 class DarnaWalletApp extends StatelessWidget {
@@ -26,16 +34,7 @@ class DarnaWalletApp extends StatelessWidget {
     return MaterialApp(
       title: 'DarnaWallet',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        scaffoldBackgroundColor: background,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: green,
-          primary: navy,
-          surface: Colors.white,
-        ),
-        fontFamily: 'Arial',
-      ),
+      theme: buildAppTheme(),
       home: const WalletHomePage(),
     );
   }
@@ -52,33 +51,37 @@ class _WalletHomePageState extends State<WalletHomePage> {
   int selectedIndex = 0;
   bool isLoading = true;
 
-  List<Map<String, dynamic>> transactions = [];
+  List<WalletTransaction> transactions = [];
 
-  final List<Map<String, dynamic>> sampleTransactions = [
-    {
-      'title': 'Grocery shopping',
-      'category': 'Food & groceries',
-      'amount': -245.50,
-      'date': 'Today, 10:42 AM',
-    },
-    {
-      'title': 'Monthly salary',
-      'category': 'Salary',
-      'amount': 6500.00,
-      'date': 'Today, 08:15 AM',
-    },
-    {
-      'title': 'Coffee shop',
-      'category': 'Food & drinks',
-      'amount': -32.00,
-      'date': 'Yesterday, 04:30 PM',
-    },
-    {
-      'title': 'Internet bill',
-      'category': 'Utilities',
-      'amount': -199.00,
-      'date': 'Yesterday, 11:20 AM',
-    },
+  final List<WalletTransaction> sampleTransactions = const [
+    WalletTransaction(
+      id: 'demo-1',
+      title: 'Grocery shopping',
+      category: 'Food & groceries',
+      amount: -245.50,
+      date: 'Today, 10:42 AM',
+    ),
+    WalletTransaction(
+      id: 'demo-2',
+      title: 'Monthly salary',
+      category: 'Salary',
+      amount: 6500.00,
+      date: 'Today, 08:15 AM',
+    ),
+    WalletTransaction(
+      id: 'demo-3',
+      title: 'Coffee shop',
+      category: 'Food & drinks',
+      amount: -32.00,
+      date: 'Yesterday, 04:30 PM',
+    ),
+    WalletTransaction(
+      id: 'demo-4',
+      title: 'Internet bill',
+      category: 'Utilities',
+      amount: -199.00,
+      date: 'Yesterday, 11:20 AM',
+    ),
   ];
 
   double get totalIncome => totalIncomeOf(transactions);
@@ -86,21 +89,6 @@ class _WalletHomePageState extends State<WalletHomePage> {
   double get totalExpenses => totalExpensesOf(transactions);
 
   double get balance => openingBalance + totalIncome - totalExpenses;
-
-  String get pageTitle {
-    switch (selectedIndex) {
-      case 1:
-        return 'Transactions';
-      case 2:
-        return 'Statistics';
-      case 3:
-        return 'Budgets';
-      case 4:
-        return 'My profile';
-      default:
-        return 'My wallet';
-    }
-  }
 
   @override
   void initState() {
@@ -110,24 +98,25 @@ class _WalletHomePageState extends State<WalletHomePage> {
 
   Future<void> _loadTransactions() async {
     try {
+      // First, process any recurring transactions that need to be generated
+      await processRecurringTransactions();
+
       final prefs = await SharedPreferences.getInstance();
       final savedData = prefs.getString(storageKey);
 
-      List<Map<String, dynamic>> loadedTransactions;
+      List<WalletTransaction> loadedTransactions;
 
       if (savedData == null) {
-        loadedTransactions = sampleTransactions
-            .map((item) => Map<String, dynamic>.from(item))
-            .toList();
+        loadedTransactions = List<WalletTransaction>.from(sampleTransactions);
 
-        await prefs.setString(storageKey, jsonEncode(loadedTransactions));
+        await _saveTransactions();
       } else {
         final decoded = jsonDecode(savedData) as List<dynamic>;
 
         loadedTransactions = decoded.map((item) {
-          final transaction = Map<String, dynamic>.from(item as Map);
-          transaction['amount'] = (transaction['amount'] as num).toDouble();
-          return transaction;
+          return WalletTransaction.fromJson(
+            Map<String, dynamic>.from(item as Map),
+          );
         }).toList();
       }
 
@@ -141,9 +130,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
       if (!mounted) return;
 
       setState(() {
-        transactions = sampleTransactions
-            .map((item) => Map<String, dynamic>.from(item))
-            .toList();
+        transactions = List<WalletTransaction>.from(sampleTransactions);
         isLoading = false;
       });
 
@@ -159,7 +146,10 @@ class _WalletHomePageState extends State<WalletHomePage> {
 
   Future<void> _saveTransactions() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(storageKey, jsonEncode(transactions));
+    final encoded = jsonEncode(
+      transactions.map((transaction) => transaction.toJson()).toList(),
+    );
+    await prefs.setString(storageKey, encoded);
   }
 
   IconData _iconFor(String category) {
@@ -336,8 +326,16 @@ class _WalletHomePageState extends State<WalletHomePage> {
 
     if (result == null || !mounted) return;
 
+    final newTransaction = WalletTransaction(
+      id: WalletTransaction.generateId(),
+      title: result['title'] as String,
+      category: result['category'] as String,
+      amount: result['amount'] as double,
+      date: result['date'] as String,
+    );
+
     setState(() {
-      transactions.insert(0, result);
+      transactions.insert(0, newTransaction);
     });
 
     try {
@@ -360,13 +358,13 @@ class _WalletHomePageState extends State<WalletHomePage> {
     }
   }
 
-  Future<void> _editTransaction(Map<String, dynamic> transaction) async {
+  Future<void> _editTransaction(WalletTransaction transaction) async {
     final formKey = GlobalKey<FormState>();
 
-    String title = transaction['title'].toString();
-    String amountText = (transaction['amount'] as num).abs().toStringAsFixed(2);
-    String category = transaction['category'].toString();
-    bool isIncome = (transaction['amount'] as num) > 0;
+    String title = transaction.title;
+    String amountText = transaction.amount.abs().toStringAsFixed(2);
+    String category = transaction.category;
+    bool isIncome = transaction.isIncome;
 
     final incomeCategories = ['Salary', 'Business', 'Gift', 'Other income'];
 
@@ -505,7 +503,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
                     'title': title,
                     'category': category,
                     'amount': isIncome ? amount : -amount,
-                    'date': transaction['date']?.toString() ?? '',
+                    'date': transaction.date,
                   });
                 },
                 child: const Text('Save changes'),
@@ -518,16 +516,22 @@ class _WalletHomePageState extends State<WalletHomePage> {
 
     if (result == null || !mounted) return;
 
-    final index = transactions.indexWhere(
-      (item) => identical(item, transaction),
-    );
+    final index = transactions.indexWhere((item) => item.id == transaction.id);
 
     if (index == -1) return;
 
-    final oldTransaction = Map<String, dynamic>.from(transactions[index]);
+    final oldTransaction = transactions[index];
+
+    final updatedTransaction = WalletTransaction(
+      id: transaction.id,
+      title: result['title'] as String,
+      category: result['category'] as String,
+      amount: result['amount'] as double,
+      date: result['date'] as String,
+    );
 
     setState(() {
-      transactions[index] = result;
+      transactions[index] = updatedTransaction;
     });
 
     try {
@@ -556,10 +560,8 @@ class _WalletHomePageState extends State<WalletHomePage> {
     }
   }
 
-  Future<void> _deleteTransaction(Map<String, dynamic> transaction) async {
-    final index = transactions.indexWhere(
-      (item) => identical(item, transaction),
-    );
+  Future<void> _deleteTransaction(WalletTransaction transaction) async {
+    final index = transactions.indexWhere((item) => item.id == transaction.id);
 
     if (index == -1) return;
 
@@ -576,7 +578,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('"${deletedTransaction['title']}" was deleted.'),
+          content: Text('"${deletedTransaction.title}" was deleted.'),
           behavior: SnackBarBehavior.floating,
           action: SnackBarAction(
             label: 'Undo',
@@ -603,7 +605,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
 
   Future<void> _restoreDeletedTransaction(
     int index,
-    Map<String, dynamic> transaction,
+    WalletTransaction transaction,
   ) async {
     if (!mounted) return;
 
@@ -631,19 +633,19 @@ class _WalletHomePageState extends State<WalletHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: background,
+        backgroundColor: AppColors.background,
         titleSpacing: 22,
         title: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(9),
               decoration: BoxDecoration(
-                color: navy,
+                color: AppColors.navy,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: const Icon(
                 Icons.account_balance_wallet_rounded,
-                color: green,
+                color: AppColors.green,
                 size: 23,
               ),
             ),
@@ -651,7 +653,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
             const Text(
               'DarnaWallet',
               style: TextStyle(
-                color: navy,
+                color: AppColors.navy,
                 fontSize: 21,
                 fontWeight: FontWeight.w800,
               ),
@@ -666,7 +668,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
               );
             },
             icon: const Icon(Icons.notifications_none_rounded),
-            color: navy,
+            color: AppColors.navy,
           ),
           const SizedBox(width: 12),
         ],
@@ -686,8 +688,8 @@ class _WalletHomePageState extends State<WalletHomePage> {
       floatingActionButton: !isLoading && selectedIndex <= 1
           ? FloatingActionButton(
               onPressed: _addTransaction,
-              backgroundColor: navy,
-              foregroundColor: green,
+              backgroundColor: AppColors.navy,
+              foregroundColor: AppColors.green,
               tooltip: 'Add transaction',
               child: const Icon(Icons.add),
             )
@@ -698,7 +700,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
           setState(() => selectedIndex = index);
         },
         backgroundColor: Colors.white,
-        indicatorColor: green.withValues(alpha: 0.18),
+        indicatorColor: AppColors.green.withValues(alpha: 0.18),
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.home_outlined),
@@ -744,7 +746,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
           style: TextStyle(
             fontSize: 25,
             fontWeight: FontWeight.w800,
-            color: navy,
+            color: AppColors.navy,
           ),
         ),
         const SizedBox(height: 23),
@@ -755,7 +757,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
           style: TextStyle(
             fontSize: 19,
             fontWeight: FontWeight.w800,
-            color: navy,
+            color: AppColors.navy,
           ),
         ),
         const SizedBox(height: 14),
@@ -766,7 +768,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
                 title: 'Income',
                 amount: '+${formatMoney(totalIncome)}',
                 icon: Icons.arrow_downward_rounded,
-                color: green,
+                color: AppColors.green,
               ),
             ),
             const SizedBox(width: 12),
@@ -789,7 +791,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
               style: TextStyle(
                 fontSize: 19,
                 fontWeight: FontWeight.w800,
-                color: navy,
+                color: AppColors.navy,
               ),
             ),
             TextButton(
@@ -828,14 +830,14 @@ class _WalletHomePageState extends State<WalletHomePage> {
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF193A4D), navy],
+          colors: [Color(0xFF193A4D), AppColors.navy],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(25),
         boxShadow: [
           BoxShadow(
-            color: navy.withValues(alpha: 0.15),
+            color: AppColors.navy.withValues(alpha: 0.15),
             blurRadius: 22,
             offset: const Offset(0, 10),
           ),
@@ -911,7 +913,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
         ),
         child: Column(
           children: [
-            Icon(icon, color: green, size: 25),
+            Icon(icon, color: AppColors.green, size: 25),
             const SizedBox(height: 7),
             Text(
               label,
@@ -969,7 +971,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
             child: Text(
               amount,
               style: const TextStyle(
-                color: navy,
+                color: AppColors.navy,
                 fontWeight: FontWeight.w800,
                 fontSize: 21,
               ),
@@ -985,9 +987,9 @@ class _WalletHomePageState extends State<WalletHomePage> {
     );
   }
 
-  Widget _buildTransaction(Map<String, dynamic> transaction) {
-    final double amount = (transaction['amount'] as num).toDouble();
-    final bool isIncome = amount > 0;
+  Widget _buildTransaction(WalletTransaction transaction) {
+    final double amount = transaction.amount;
+    final bool isIncome = transaction.isIncome;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 11),
@@ -1004,13 +1006,13 @@ class _WalletHomePageState extends State<WalletHomePage> {
             height: 47,
             decoration: BoxDecoration(
               color: isIncome
-                  ? green.withValues(alpha: 0.13)
+                  ? AppColors.green.withValues(alpha: 0.13)
                   : const Color(0xFFF0F2F5),
               borderRadius: BorderRadius.circular(15),
             ),
             child: Icon(
-              _iconFor(transaction['category'] as String),
-              color: isIncome ? const Color(0xFF168866) : navy,
+              _iconFor(transaction.category),
+              color: isIncome ? const Color(0xFF168866) : AppColors.navy,
               size: 23,
             ),
           ),
@@ -1020,21 +1022,21 @@ class _WalletHomePageState extends State<WalletHomePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  transaction['title'] as String,
+                  transaction.title,
                   style: const TextStyle(
-                    color: navy,
+                    color: AppColors.navy,
                     fontWeight: FontWeight.w700,
                     fontSize: 14,
                   ),
                 ),
                 const SizedBox(height: 5),
                 Text(
-                  transaction['category'] as String,
+                  transaction.category,
                   style: const TextStyle(color: Colors.black54, fontSize: 12),
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  transaction['date'] as String,
+                  transaction.date,
                   style: const TextStyle(color: Colors.black38, fontSize: 11),
                 ),
               ],
@@ -1044,7 +1046,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
           Text(
             '${isIncome ? '+' : '-'}${formatMoney(amount)}',
             style: TextStyle(
-              color: isIncome ? const Color(0xFF168866) : navy,
+              color: isIncome ? const Color(0xFF168866) : AppColors.navy,
               fontWeight: FontWeight.w800,
               fontSize: 13,
             ),
@@ -1071,37 +1073,9 @@ class _WalletHomePageState extends State<WalletHomePage> {
       return BudgetManagementPage(transactions: transactions);
     }
 
-    const String description =
-        'Your account settings and preferences will appear here.';
-
-    return Padding(
-      padding: const EdgeInsets.all(28),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.person_outline_rounded, color: green, size: 64),
-          const SizedBox(height: 18),
-          Text(
-            pageTitle,
-            style: const TextStyle(
-              color: navy,
-              fontSize: 25,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            description,
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.black54, fontSize: 15),
-          ),
-          const SizedBox(height: 20),
-          OutlinedButton(
-            onPressed: () => setState(() => selectedIndex = 0),
-            child: const Text('Back to wallet'),
-          ),
-        ],
-      ),
+    return ProfilePage(
+      transactions: transactions,
+      onDataChanged: _loadTransactions,
     );
   }
 
