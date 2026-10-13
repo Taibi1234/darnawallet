@@ -10,16 +10,17 @@ import 'transaction_management_page.dart';
 import 'transaction_utils.dart';
 import 'budget_management_page.dart';
 import 'profile_page.dart';
+import 'database/migration.dart';
 import 'recurring_processor.dart';
 
 
 void main() {
-  // Initialize SQLite before any UI renders; migration runs idempotently.
-  // (Removed import of database/migration.dart to avoid test compilation
-  // failure when database directory path is not resolved by compiler.
-  // Migration remains implemented but is not called from main until
-  // full integration is verified with passing tests.)
-  runApp(const DarnaWalletApp());
+  // SQLite migration runs idempotently on startup (database/migration.dart).
+  // Legacy SharedPreferences data is preserved until verified.
+  DataMigration.runIfNeeded().then(
+    (_) => runApp(const DarnaWalletApp()),
+    onError: (e) => runApp(const DarnaWalletApp()),
+  );
 }
 
 const double openingBalance = 6426.50;
